@@ -1,126 +1,96 @@
 const express = require("express");
-const fetch = require("node-fetch");
-const cors = require("cors");
-const path = require("path");
+const fetch   = require("node-fetch");
+const cors    = require("cors");
+const path    = require("path");
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 3000;
-const API_BASE = "https://omegatech-api.dixonomega.tech/api/tools/tempmail";
+const MAILTM = "https://api.mail.tm";
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Generate a new temp email
-app.get("/api/generate", async (req, res) => {
+/* ── 1. GET AVAILABLE DOMAINS ── */
+app.get("/api/domains", async (req, res) => {
   try {
-    const domain = req.query.domain || "omega.tech";
-    const url = `${API_BASE}?action=generate&domain=${encodeURIComponent(domain)}`;
-    console.log("[GENERATE]", url);
-    const response = await fetch(url, { headers: { "Accept": "application/json" } });
-    const data = await response.json();
-    console.log("[GENERATE RESPONSE]", JSON.stringify(data));
-    res.json(data);
-  } catch (err) {
-    console.error("[GENERATE ERROR]", err.message);
-    res.status(500).json({ success: false, message: "Failed to generate email." });
+    const r    = await fetch(`${MAILTM}/domains?page=1`);
+    const data = await r.json();
+    // data["hydra:member"] is the array of domain objects
+    const domains = (data["hydra:member"] || []).map(d => d.domain);
+    res.json({ success: true, domains });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
   }
 });
 
-// Fetch inbox — tries multiple action names the API may use
+/* ── 2. CREATE ACCOUNT (generate email) ── */
+app.post("/api/generate", async (req, res) => {
+  try {
+    const { address, password } = req.body;
+    const r    = await fetch(`${MAILTM}/accounts`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ address, password })
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ success: false, message: data["hydra:description"] || "Failed to create account" });
+    res.json({ success: true, id: data.id, address: data.address });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+/* ── 3. GET TOKEN (login) ── */
+app.post("/api/token", async (req, res) => {
+  try {
+    const { address, password } = req.body;
+    const r    = await fetch(`${MAILTM}/token`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ address, password })
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ success: false, message: "Login failed" });
+    res.json({ success: true, token: data.token });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+/* ── 4. GET INBOX ── */
 app.get("/api/inbox", async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ success: false, message: "Email is required." });
-
-  // Try these action names in order until one returns messages
-  const actions = ["inbox", "messages", "getInbox", "check", "read"];
-
-  for (const action of actions) {
-    try {
-      const url = `${API_BASE}?action=${action}&email=${encodeURIComponent(email)}`;
-      console.log(`[INBOX TRY] ${url}`);
-      const response = await fetch(url, { headers: { "Accept": "application/json" } });
-      const data = await response.json();
-      console.log(`[INBOX ${action}]`, JSON.stringify(data).substring(0, 300));
-
-      // Accept if it has success:true AND some result content
-      if (data.success) {
-        // Normalize the messages array from ANY possible shape
-        const msgs = extractMessages(data);
-        return res.json({
-          success: true,
-          action_used: action,
-          raw: data,
-          messages: msgs
-        });
-      }
-    } catch (err) {
-      console.error(`[INBOX ${action} ERROR]`, err.message);
-    }
-  }
-
-  // All actions failed — return empty but with raw for debugging
-  res.json({ success: true, messages: [], action_used: "none", raw: null });
-});
-
-// Raw passthrough — lets frontend call ANY action directly for debugging
-app.get("/api/raw", async (req, res) => {
   try {
-    const qs = new URLSearchParams(req.query).toString();
-    const url = `${API_BASE}?${qs}`;
-    console.log("[RAW]", url);
-    const response = await fetch(url, { headers: { "Accept": "application/json" } });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ success: false, message: "Token required" });
+    const r    = await fetch(`${MAILTM}/messages?page=1`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ success: false, message: "Failed to fetch inbox" });
+    const messages = (data["hydra:member"] || []);
+    res.json({ success: true, messages, total: data["hydra:totalItems"] || 0 });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
   }
 });
 
-/**
- * Deep-search the API response for a messages array,
- * no matter what key it's stored under.
- */
-function extractMessages(data) {
-  // Direct arrays
-  if (Array.isArray(data.result))   return data.result;
-  if (Array.isArray(data.messages)) return data.messages;
-  if (Array.isArray(data.inbox))    return data.inbox;
-  if (Array.isArray(data.data))     return data.data;
-  if (Array.isArray(data.emails))   return data.emails;
-  if (Array.isArray(data.mail))     return data.mail;
-
-  // Nested under result object
-  if (data.result && typeof data.result === "object") {
-    const r = data.result;
-    if (Array.isArray(r.messages)) return r.messages;
-    if (Array.isArray(r.inbox))    return r.inbox;
-    if (Array.isArray(r.emails))   return r.emails;
-    if (Array.isArray(r.mail))     return r.mail;
-    if (Array.isArray(r.data))     return r.data;
-
-    // Single message object wrapped in result
-    if (r.subject || r.from || r.body) return [r];
+/* ── 5. GET SINGLE MESSAGE (full body) ── */
+app.get("/api/message/:id", async (req, res) => {
+  try {
+    const { token } = req.query;
+    const r    = await fetch(`${MAILTM}/messages/${req.params.id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ success: false, message: "Failed to fetch message" });
+    res.json({ success: true, message: data });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
   }
-
-  // Fallback: collect any array found in top-level keys
-  for (const key of Object.keys(data)) {
-    if (Array.isArray(data[key]) && data[key].length > 0) {
-      const first = data[key][0];
-      if (first && typeof first === "object" && (first.subject || first.from || first.body || first.text)) {
-        return data[key];
-      }
-    }
-  }
-
-  return [];
-}
-
-// Fallback
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ KingBadboi TempMail running on port ${PORT}`);
-});
+/* ── FALLBACK ── */
+app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+
+app.listen(PORT, () => console.log(`✅ KingBadboi TempMail on port ${PORT}`));
