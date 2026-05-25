@@ -768,3 +768,95 @@ footer a:hover { text-shadow: var(--glow); }
 .email-body-wrap {
   margin-top: 8px;
 }
+
+/* ── v3 ADDITIONS ── */
+.msg-new { border-color: rgba(0,229,255,0.3); }
+
+.new-dot {
+  display: inline-block;
+  background: var(--accent);
+  color: #000;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.otp-highlight {
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.35);
+  border-radius: 3px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+}
+.otp-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+}
+.otp-code {
+  font-family: 'Orbitron', monospace;
+  font-size: 32px;
+  color: var(--accent);
+  text-shadow: var(--glow-strong);
+  letter-spacing: 8px;
+  cursor: pointer;
+}
+.otp-code:hover { opacity: 0.75; }
+
+.verify-link-box {
+  background: rgba(0,255,136,0.05);
+  border: 1px solid rgba(0,255,136,0.25);
+  border-radius: 3px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.btn-verify-link {
+  display: inline-block;
+  margin-top: 8px;
+  background: linear-gradient(135deg,#00c853,#00e5a0);
+  color: #000;
+  font-family: 'Orbitron', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 11px 22px;
+  border-radius: 2px;
+  text-decoration: none;
+  transition: all 0.2s;
+  box-shadow: 0 0 20px rgba(0,200,83,0.3);
+}
+.btn-verify-link:hover { box-shadow: 0 0 35px rgba(0,200,83,0.5); transform: translateY(-1px); }
+
+.email-frame {
+  width: 100%; border: none; border-radius: 3px;
+  background: #fff; min-height: 180px; display: block;
+}
+.email-text {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+  line-height: 1.8; max-height: 450px; overflow-y: auto;
+}
+.email-body-wrap { margin-top: 10px; }
+
+.msg-meta { flex: 1; min-width: 0; }
+.msg-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.toggle-arrow { font-size:10px; color:var(--muted); }
+
+#inboxBadge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #000;
+  font-family: 'Share Tech Mono', monospace; font-size: 10px; font-weight: 700;
+  border-radius: 50%; width: 20px; height: 20px;
+  margin-left: 8px; vertical-align: middle;
+}
+.status-dot.warn { background:#ffaa00; box-shadow:0 0 8px #ffaa00; animation:pulse 1s infinite; }
+
+.verify-link-box .otp-label { color: rgba(0,255,136,0.5); }

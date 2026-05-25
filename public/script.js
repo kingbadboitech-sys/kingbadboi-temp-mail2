@@ -1,25 +1,29 @@
 /* ═══════════════════════════════════════════
-   KingBadboi Tech TempMail — script.js  v2
-   Fixed: inbox parsing, HTML render, OTP detection, fast refresh
+   KingBadboi Tech TempMail — script.js v3
+   Powered by mail.tm — real inbox, works on
+   Instagram, TikTok, WhatsApp, Twitter, etc.
 ═══════════════════════════════════════════ */
 
 const STATE = {
-  email: null,
-  refreshCountdown: 10,
-  countdownTimer: null,
-  messageCount: 0
+  email:    null,
+  password: null,
+  token:    null,
+  countdown: 10,
+  timer:    null,
+  msgCount: 0,
+  domains:  []
 };
 
-/* ── DOM REFS ── */
-const modal       = document.getElementById('followModal');
-const emailText   = document.getElementById('emailText');
-const statusDot   = document.getElementById('statusDot');
-const statusTxt   = document.getElementById('statusTxt');
-const inboxList   = document.getElementById('inboxList');
-const domainSel   = document.getElementById('domainSelect');
-const countdownEl = document.getElementById('countdown');
-const toast       = document.getElementById('toast');
-const inboxBadge  = document.getElementById('inboxBadge');
+/* ── DOM ── */
+const modal      = document.getElementById('followModal');
+const emailText  = document.getElementById('emailText');
+const statusDot  = document.getElementById('statusDot');
+const statusTxt  = document.getElementById('statusTxt');
+const inboxList  = document.getElementById('inboxList');
+const domainSel  = document.getElementById('domainSelect');
+const cdEl       = document.getElementById('countdown');
+const toast      = document.getElementById('toast');
+const badge      = document.getElementById('inboxBadge');
 
 /* ── MODAL ── */
 document.getElementById('btnFollowNow').addEventListener('click', () => {
@@ -27,58 +31,86 @@ document.getElementById('btnFollowNow').addEventListener('click', () => {
   setTimeout(closeModal, 1500);
 });
 document.getElementById('btnEnterAnyway').addEventListener('click', closeModal);
-
 function closeModal() {
   modal.style.opacity = '0';
   modal.style.transition = 'opacity 0.3s';
   setTimeout(() => { modal.style.display = 'none'; }, 300);
 }
 
-/* ── GENERATE ── */
+/* ── LOAD DOMAINS ON START ── */
+async function loadDomains() {
+  try {
+    const res  = await fetch('/api/domains');
+    const data = await res.json();
+    if (data.success && data.domains.length) {
+      STATE.domains = data.domains;
+      domainSel.innerHTML = '';
+      data.domains.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = `@${d}`;
+        domainSel.appendChild(opt);
+      });
+    }
+  } catch(e) {
+    console.error('Domain load failed', e);
+  }
+}
+loadDomains();
+
+/* ── GENERATE EMAIL ── */
 async function generateEmail() {
-  const domain = domainSel.value;
   setLoading('btnGenerate', true, '⚡ Generate');
-  stopAutoRefresh();
-  emailText.textContent = 'Generating...';
-  emailText.className = 'placeholder';
-  setStatus('idle', 'Requesting mailbox...');
+  stopTimer();
+  STATE.token = null;
+  STATE.email = null;
+
+  emailText.textContent = 'Creating mailbox...';
+  emailText.className   = 'placeholder';
+  setStatus('idle', 'Setting up your mailbox...');
+
+  // Random username + strong random password
+  const user     = 'kbb' + Math.random().toString(36).slice(2, 9);
+  const domain   = domainSel.value;
+  const address  = `${user}@${domain}`;
+  const password = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 
   try {
-    const res  = await fetch(`/api/generate?domain=${encodeURIComponent(domain)}`);
-    const data = await res.json();
+    // Step 1: create account
+    const createRes  = await fetch('/api/generate', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ address, password })
+    });
+    const createData = await createRes.json();
+    if (!createData.success) throw new Error(createData.message || 'Account creation failed');
 
-    if (data.success && data.result && data.result.email) {
-      STATE.email = data.result.email;
-      emailText.textContent = STATE.email;
-      emailText.className = '';
+    // Step 2: get token
+    const tokenRes  = await fetch('/api/token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ address, password })
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.success) throw new Error('Login failed');
 
-      // Warn if mailbox status is bad
-      const emailStatus = data.result.emailStatus || '';
-      const uptime      = data.result.uptime      || '';
+    STATE.email    = address;
+    STATE.password = password;
+    STATE.token    = tokenData.token;
+    STATE.msgCount = 0;
 
-      if (uptime === 'online') {
-        setStatus('online', 'Mailbox ready — waiting for mail');
-      } else if (uptime === 'offline' || emailStatus === 'bad') {
-        setStatus('warn', '⚠ Mailbox may be slow — try refreshing or regenerate');
-        showToast('⚠ This mailbox status is unstable. Still try sending mail!');
-      } else {
-        setStatus('online', 'Mailbox created — send mail to it now');
-      }
-
-      STATE.messageCount = 0;
-      renderInboxEmpty('USE THIS EMAIL — MESSAGES WILL APPEAR HERE AUTOMATICALLY');
-      startAutoRefresh();
-      showToast('✅ Email generated! Copy it and use on any site.');
-    } else {
-      emailText.textContent = '⚠ Could not generate';
-      emailText.className = 'placeholder';
-      setStatus('offline', 'Generation failed');
-      showToast('❌ Failed to get email. Retry.');
-    }
-  } catch (err) {
-    emailText.textContent = '⚠ Server error';
-    emailText.className = 'placeholder';
-    showToast('❌ Network error — is server running?');
+    emailText.textContent = STATE.email;
+    emailText.className   = '';
+    setStatus('online', 'Mailbox ready — use this email anywhere!');
+    renderEmpty('USE THIS EMAIL ON ANY SITE — MAIL ARRIVES HERE AUTOMATICALLY');
+    if (badge) badge.textContent = '0';
+    startTimer();
+    showToast('✅ Real mailbox ready! Works on Instagram, TikTok, Google & more.');
+  } catch(err) {
+    emailText.textContent = '⚠ Failed — tap retry';
+    emailText.className   = 'placeholder';
+    setStatus('offline', 'Error: ' + err.message);
+    showToast('❌ ' + err.message + ' — try again!');
   } finally {
     setLoading('btnGenerate', false, '⚡ Generate');
   }
@@ -87,197 +119,209 @@ async function generateEmail() {
 /* ── COPY ── */
 function copyEmail() {
   if (!STATE.email) return showToast('⚠ Generate an email first!');
-  const copy = () => {
+  try { navigator.clipboard.writeText(STATE.email); } catch(e) {
     const t = document.createElement('textarea');
     t.value = STATE.email;
-    document.body.appendChild(t);
-    t.select();
-    document.execCommand('copy');
-    document.body.removeChild(t);
-  };
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(STATE.email).catch(copy);
-  } else {
-    copy();
+    document.body.appendChild(t); t.select();
+    document.execCommand('copy'); document.body.removeChild(t);
   }
-  showToast('📋 Email copied to clipboard!');
+  showToast('📋 Email copied! Paste it on any signup form.');
 }
 
 /* ── FETCH INBOX ── */
 async function fetchInbox(silent = false) {
-  if (!STATE.email) return;
+  if (!STATE.token) return;
   if (!silent) setLoading('btnRefresh', true, '🔄 Refresh');
 
   try {
-    const res  = await fetch(`/api/inbox?email=${encodeURIComponent(STATE.email)}`);
+    const res  = await fetch(`/api/inbox?token=${encodeURIComponent(STATE.token)}`);
     const data = await res.json();
 
-    // Log raw response for debugging (visible in browser console)
-    console.log('[INBOX RAW]', data);
-
-    const messages = data.messages || [];
-
-    if (messages.length > 0) {
-      renderInbox(messages);
-      if (messages.length !== STATE.messageCount) {
-        STATE.messageCount = messages.length;
-        if (!silent) showToast(`📨 ${messages.length} message(s) in inbox!`);
-        else         showToast(`📨 New mail arrived!`);
-      }
-      setStatus('online', `${messages.length} message(s) in inbox`);
-    } else {
-      if (!silent) {
-        showToast('📭 No messages yet. Did you send to this email?');
-        renderInboxEmpty('NO MESSAGES YET — SEND AN EMAIL TO THIS ADDRESS');
-      }
-      if (STATE.messageCount === 0) {
-        setStatus('online', 'Waiting for mail...');
-      }
+    if (!data.success) {
+      // Token may have expired — try to re-login
+      if (!silent) showToast('⚠ Session expired. Regenerate email.');
+      return;
     }
-  } catch (err) {
-    console.error('[INBOX FETCH ERROR]', err);
-    if (!silent) showToast('❌ Failed to check inbox.');
+
+    const msgs = data.messages || [];
+    if (badge) badge.textContent = msgs.length;
+
+    if (msgs.length === 0) {
+      if (!silent) showToast('📭 No messages yet. Send an email to your address!');
+      if (STATE.msgCount === 0) renderEmpty('WAITING FOR MAIL... AUTO-CHECKING EVERY 10s');
+      return;
+    }
+
+    if (msgs.length !== STATE.msgCount) {
+      STATE.msgCount = msgs.length;
+      showToast(`📨 ${msgs.length} message(s) in inbox!`);
+    }
+
+    setStatus('online', `${msgs.length} message(s) received`);
+    renderInbox(msgs);
+  } catch(e) {
+    if (!silent) showToast('❌ Inbox check failed.');
   } finally {
     if (!silent) setLoading('btnRefresh', false, '🔄 Refresh');
   }
 }
 
+/* ── OPEN FULL MESSAGE ── */
+async function openMessage(id, el) {
+  if (el.dataset.loaded) {
+    el.classList.toggle('open');
+    return;
+  }
+  if (!STATE.token) return;
+
+  el.innerHTML = '<div style="padding:20px;text-align:center"><span class="spinner"></span> Loading...</div>';
+  el.classList.add('open');
+
+  try {
+    const res  = await fetch(`/api/message/${id}?token=${encodeURIComponent(STATE.token)}`);
+    const data = await res.json();
+    if (!data.success) { el.innerHTML = '<div style="padding:16px;color:var(--accent2)">Failed to load message.</div>'; return; }
+
+    const msg      = data.message;
+    const htmlBody = msg.html && msg.html[0] ? msg.html[0] : null;
+    const textBody = msg.text || '';
+    const rawBody  = htmlBody || textBody || '(No content)';
+
+    // OTP detection — covers 4-8 digit codes, spaced, dashed
+    const searchIn = (msg.subject || '') + ' ' + textBody;
+    const otpMatch = searchIn.match(/\b(\d[\d \-]{2,7}\d)\b/);
+    const otp      = otpMatch ? otpMatch[1].replace(/[\s\-]/g, '') : null;
+
+    // Verification link detection
+    const linkRx   = /href=["'](https?:\/\/[^"']{15,}(?:verif|confirm|activate|token|auth|click|validate|account)[^"']*?)["']/i;
+    const linkMatch = rawBody.match(linkRx);
+    const vLink    = linkMatch ? linkMatch[1] : null;
+
+    let html = '';
+
+    if (otp) {
+      html += `
+        <div class="otp-highlight">
+          <div class="otp-label">// VERIFICATION CODE DETECTED</div>
+          <div class="otp-code" onclick="copyOtp('${otp}')" title="Tap to copy">
+            ${otp} <span style="font-size:13px;opacity:0.5">📋 tap to copy</span>
+          </div>
+        </div>`;
+    }
+
+    if (vLink) {
+      html += `
+        <div class="verify-link-box">
+          <div class="otp-label">// VERIFICATION LINK FOUND</div>
+          <a href="${escAttr(vLink)}" target="_blank" rel="noopener noreferrer" class="btn-verify-link">
+            🔗 CLICK HERE TO VERIFY / CONFIRM ACCOUNT
+          </a>
+        </div>`;
+    }
+
+    if (htmlBody) {
+      // Render HTML email in sandboxed iframe
+      html += `<div class="email-body-wrap">
+        <iframe class="email-frame"
+          srcdoc="${escAttr(htmlBody)}"
+          sandbox="allow-same-origin allow-popups"
+          onload="iframeHeight(this)">
+        </iframe>
+      </div>`;
+    } else {
+      html += `<div class="email-body-wrap"><pre class="email-text">${escHtml(textBody || '(Empty)')}</pre></div>`;
+    }
+
+    el.innerHTML   = html;
+    el.dataset.loaded = '1';
+  } catch(e) {
+    el.innerHTML = '<div style="padding:16px;color:var(--accent2)">Error loading message.</div>';
+  }
+}
+
+function iframeHeight(iframe) {
+  try { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 30) + 'px'; }
+  catch(e) { iframe.style.height = '320px'; }
+}
+
 /* ── RENDER INBOX ── */
-function renderInbox(messages) {
+function renderInbox(msgs) {
   inboxList.innerHTML = '';
-  if (inboxBadge) inboxBadge.textContent = messages.length;
-
-  messages.forEach((msg, i) => {
-    // Normalise field names — API may use different keys
-    const from    = msg.from    || msg.sender      || msg.from_address || 'Unknown Sender';
-    const subject = msg.subject || msg.title       || msg.sub          || '(No Subject)';
-    const rawBody = msg.body    || msg.html         || msg.text
-                 || msg.content || msg.message      || msg.bodyText
-                 || msg.bodyHtml|| msg.htmlBody      || msg.textBody    || '';
-    const time    = msg.date    || msg.received_at  || msg.created_at
-                 || msg.time    || msg.timestamp     || '';
-
-    // Detect OTP — handles "123 456", "123-456", plain 4–8 digit codes
-    const plainText    = rawBody.replace(/<[^>]+>/g, ' ');
-    const searchTarget = subject + ' ' + plainText;
-    const otpMatch     = searchTarget.match(/\b(\d[\d\s\-]{3,9}\d)\b/);
-    const otp          = otpMatch ? otpMatch[1].replace(/[\s\-]/g, '') : null;
-
-    // Also detect verification links
-    const linkMatch  = rawBody.match(/href=["'](https?:\/\/[^"']{10,}(?:verif|confirm|activate|token|auth|click)[^"']*?)["']/i);
-    const verifyLink = linkMatch ? linkMatch[1] : null;
-
-    // Render body: prefer HTML, fall back to text with newlines
-    const isHtml   = /<[a-z][\s\S]*>/i.test(rawBody);
-    const bodyHtml = isHtml
-      ? `<iframe class="email-frame" srcdoc="${escAttr(rawBody)}" sandbox="allow-same-origin" onload="autoHeight(this)"></iframe>`
-      : `<pre class="email-text">${escHtml(rawBody || '(Empty message)')}</pre>`;
+  msgs.forEach((msg, i) => {
+    const from    = msg.from?.address || msg.from?.name || 'Unknown';
+    const subject = msg.subject || '(No Subject)';
+    const time    = msg.createdAt || '';
+    const isNew   = !msg.seen;
 
     const item = document.createElement('div');
-    item.className = 'message-item';
+    item.className = 'message-item' + (isNew ? ' msg-new' : '');
     item.innerHTML = `
-      <div class="message-header" onclick="toggleMsg(${i})">
+      <div class="message-header" onclick="toggleMsg(${i}, '${msg.id}')">
         <div class="msg-meta">
-          <div class="message-from">📧 ${escHtml(String(from))}</div>
-          <div class="message-subject">${escHtml(String(subject))}</div>
+          <div class="message-from">📧 ${escHtml(from)}</div>
+          <div class="message-subject">${isNew ? '<span class="new-dot">NEW</span> ' : ''}${escHtml(subject)}</div>
         </div>
         <div class="msg-right">
-          ${otp ? `<span class="otp-chip">${otp}</span>` : ''}
           <span class="message-time">${formatTime(time)}</span>
           <span class="toggle-arrow" id="arrow-${i}">▼</span>
         </div>
       </div>
-      <div class="message-body" id="msg-${i}">
-        ${otp ? `
-          <div class="otp-highlight">
-            <div class="otp-label">// VERIFICATION CODE</div>
-            <div class="otp-code" onclick="copyOtp('${otp}')" title="Click to copy">${otp} <span style="font-size:12px;opacity:0.5">📋</span></div>
-          </div>` : ''}
-        ${verifyLink ? `
-          <div class="verify-link-box">
-            <div class="otp-label">// VERIFICATION LINK DETECTED</div>
-            <a href="${escAttr(verifyLink)}" target="_blank" rel="noopener noreferrer" class="btn-verify-link">
-              🔗 CLICK TO VERIFY / CONFIRM
-            </a>
-          </div>` : ''}
-        <div class="email-body-wrap">
-          ${bodyHtml}
-        </div>
-      </div>
+      <div class="message-body" id="msg-${i}"></div>
     `;
     inboxList.appendChild(item);
   });
 }
 
-function autoHeight(iframe) {
-  try {
-    iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px';
-  } catch (e) { iframe.style.height = '300px'; }
-}
-
-function renderInboxEmpty(msg) {
-  if (inboxBadge) inboxBadge.textContent = '0';
-  inboxList.innerHTML = `
-    <div class="inbox-empty">
-      <span class="empty-icon">📭</span>
-      ${msg || 'INBOX IS EMPTY'}
-    </div>
-  `;
-}
-
-function toggleMsg(i) {
+function toggleMsg(i, id) {
   const body  = document.getElementById(`msg-${i}`);
   const arrow = document.getElementById(`arrow-${i}`);
   const open  = body.classList.toggle('open');
   if (arrow) arrow.textContent = open ? '▲' : '▼';
+  if (open)  openMessage(id, body);
 }
 
 function copyOtp(code) {
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(code).catch(() => {});
-  }
-  showToast(`📋 Code ${code} copied!`);
+  try { navigator.clipboard.writeText(code); } catch(e) {}
+  showToast(`📋 Code ${code} copied to clipboard!`);
 }
 
-/* ── AUTO REFRESH (10s) ── */
-function startAutoRefresh() {
-  stopAutoRefresh();
-  STATE.refreshCountdown = 10;
-  updateCountdown();
-  STATE.countdownTimer = setInterval(() => {
-    STATE.refreshCountdown--;
-    updateCountdown();
-    if (STATE.refreshCountdown <= 0) {
+function renderEmpty(msg) {
+  inboxList.innerHTML = `
+    <div class="inbox-empty">
+      <span class="empty-icon">📭</span>
+      ${msg || 'INBOX IS EMPTY'}
+    </div>`;
+}
+
+/* ── TIMER ── */
+function startTimer() {
+  stopTimer();
+  STATE.countdown = 10;
+  updateCd();
+  STATE.timer = setInterval(() => {
+    STATE.countdown--;
+    updateCd();
+    if (STATE.countdown <= 0) {
       fetchInbox(true);
-      STATE.refreshCountdown = 10;
+      STATE.countdown = 10;
     }
   }, 1000);
 }
-
-function stopAutoRefresh() {
-  clearInterval(STATE.countdownTimer);
-  STATE.countdownTimer = null;
-  STATE.refreshCountdown = 10;
-  updateCountdown();
-}
-
-function updateCountdown() {
-  if (countdownEl) countdownEl.textContent = STATE.refreshCountdown;
-}
+function stopTimer() { clearInterval(STATE.timer); STATE.countdown = 10; updateCd(); }
+function updateCd()  { if (cdEl) cdEl.textContent = STATE.countdown; }
 
 /* ── STATUS ── */
 function setStatus(type, msg) {
-  const classes = { online: 'online', offline: 'offline', warn: 'warn', idle: '' };
-  statusDot.className = 'status-dot ' + (classes[type] || '');
+  statusDot.className = 'status-dot ' + (type || '');
   statusTxt.textContent = msg || 'Standby';
 }
 
 /* ── LOADING ── */
-function setLoading(btnId, loading, label) {
-  const btn = document.getElementById(btnId);
-  if (!btn) return;
-  btn.disabled = loading;
-  btn.innerHTML = loading ? '<span class="spinner"></span>' : label;
+function setLoading(id, on, label) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  b.disabled  = on;
+  b.innerHTML = on ? '<span class="spinner"></span>' : label;
 }
 
 /* ── TOAST ── */
@@ -285,25 +329,19 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.classList.add('show');
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => toast.classList.remove('show'), 4000);
+  toast._t = setTimeout(() => toast.classList.remove('show'), 4500);
 }
 
 /* ── UTILS ── */
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function escAttr(s) {
-  return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+function escHtml(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s)  { return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function formatTime(ts) {
   if (!ts) return '';
   try {
     const d = new Date(ts);
-    if (isNaN(d)) return String(ts);
+    if (isNaN(d)) return ts;
     return d.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
-  } catch { return String(ts); }
+  } catch { return ts; }
 }
 
 /* ── WIRE UP ── */
